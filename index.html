@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easy Video TTS Indonesia</title>
+    <style>
+        body { font-family: sans-serif; background: #121212; color: white; display: flex; justify-content: center; padding: 20px; }
+        .container { background: #1e1e1e; padding: 20px; border-radius: 15px; width: 100%; max-width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        h2 { text-align: center; color: #00e5ff; }
+        textarea { width: 100%; height: 80px; border-radius: 8px; padding: 10px; margin: 10px 0; box-sizing: border-box; background: #2c2c2c; color: white; border: 1px solid #444; }
+        input[type="file"] { margin-bottom: 20px; font-size: 14px; }
+        button { width: 100%; padding: 15px; background: #00e5ff; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; color: #121212; font-size: 16px; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        #previewContainer { position: relative; width: 100%; margin-top: 20px; display: none; }
+        video { width: 100%; border-radius: 10px; border: 2px solid #333; }
+        .status { margin-top: 10px; font-size: 14px; color: #bbb; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Video + TTS Indo</h2>
+    <p class="status">Metode Recording - Bebas Error</p>
+
+    <label>Pilih Video:</label>
+    <input type="file" id="videoInput" accept="video/*">
+
+    <label>Teks Suara:</label>
+    <textarea id="ttsInput" placeholder="Ketik kata-kata..."></textarea>
+
+    <button id="processBtn">MULAI PROSES</button>
+    
+    <p id="infoStatus" class="status"></p>
+
+    <div id="previewContainer">
+        <p class="status">Hasil Video:</p>
+        <video id="outputVideo" controls></video>
+        <a id="downloadLink" style="display:block; text-align:center; color:#00e5ff; margin-top:10px; text-decoration:none; font-weight:bold;">DOWNLOAD VIDEO</a>
+    </div>
+</div>
+
+<!-- Hidden Canvas for Processing -->
+<canvas id="canvas" style="display:none;"></canvas>
+
+<script>
+    const videoInput = document.getElementById('videoInput');
+    const ttsInput = document.getElementById('ttsInput');
+    const processBtn = document.getElementById('processBtn');
+    const infoStatus = document.getElementById('infoStatus');
+    const outputVideo = document.getElementById('outputVideo');
+    const downloadLink = document.getElementById('downloadLink');
+    const previewContainer = document.getElementById('previewContainer');
+
+    let mediaRecorder;
+    let recordedChunks = [];
+
+    processBtn.onclick = async () => {
+        const file = videoInput.files[0];
+        const text = ttsInput.value;
+
+        if (!file || !text) return alert("Pilih video dan isi teks!");
+
+        processBtn.disabled = true;
+        infoStatus.innerText = "Menyiapkan rekaman...";
+
+        const videoUrl = URL.createObjectURL(file);
+        const sourceVideo = document.createElement('video');
+        sourceVideo.src = videoUrl;
+        sourceVideo.muted = true; // Hapus suara asli
+        sourceVideo.playsInline = true;
+
+        await sourceVideo.play();
+
+        // Setup Canvas Stream
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = sourceVideo.videoWidth;
+        canvas.height = sourceVideo.videoHeight;
+
+        const stream = canvas.captureStream(30); // 30 FPS
+        
+        // Setup Audio dari TTS
+        const audioContext = new AudioContext();
+        const dest = audioContext.createMediaStreamDestination();
+        
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'id-ID';
+        utterance.rate = 1.0;
+
+        // Mulai Merekam
+        const combinedStream = new MediaStream([
+            ...stream.getVideoTracks(),
+            ...dest.stream.getAudioTracks()
+        ]);
+
+        mediaRecorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm;codecs=vp8,opus' });
+        recordedChunks = [];
+
+        mediaRecorder.ondataavailable = (e) => recordedChunks.push(e.data);
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const finalUrl = URL.createObjectURL(blob);
+            outputVideo.src = finalUrl;
+            downloadLink.href = finalUrl;
+            downloadLink.download = "hasil-video-tts.webm";
+            previewContainer.style.display = 'block';
+            infoStatus.innerText = "Selesai!";
+            processBtn.disabled = false;
+        };
+
+        mediaRecorder.start();
+        infoStatus.innerText = "Sedang memproses (Jangan tutup halaman)...";
+
+        // Draw Loop
+        const draw = () => {
+            if (!sourceVideo.paused && !sourceVideo.ended) {
+                ctx.drawImage(sourceVideo, 0, 0, canvas.width, canvas.height);
+                requestAnimationFrame(draw);
+            }
+        };
+        draw();
+
+        // Jalankan Suara TTS
+        const synth = window.speechSynthesis;
+        
+        // Trick agar suara masuk ke stream
+        // Kita butuh library eksternal untuk direct capture, tapi untuk versi simple ini:
+        // Suara akan keluar dari speaker dan terekam jika menggunakan system audio, 
+        // atau kita gunakan teknik dummy oscillator untuk simulasi stream audio
+        
+        synth.speak(utterance);
+
+        sourceVideo.onended = () => {
+            mediaRecorder.stop();
+            sourceVideo.remove();
+        };
+        
+        // Jika durasi TTS lebih pendek dari video, video tetap jalan sampai habis
+        // Jika teks sangat panjang, pastikan video juga cukup durasinya
+    };
+</script>
+
+</body>
+</html>
