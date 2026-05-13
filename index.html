@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video TTS Fix</title>
+    <style>
+        body { font-family: sans-serif; background: #121212; color: white; display: flex; justify-content: center; padding: 20px; }
+        .box { background: #1e1e1e; padding: 20px; border-radius: 15px; width: 100%; max-width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        textarea { width: 100%; height: 80px; margin: 10px 0; border-radius: 8px; padding: 10px; box-sizing: border-box; background: #2c2c2c; color: white; border: 1px solid #444; }
+        button { width: 100%; padding: 15px; background: #00e5ff; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; color: #121212; }
+        #status { margin-top: 15px; font-size: 13px; color: #00e5ff; text-align: center; }
+        video { width: 100%; margin-top: 15px; border-radius: 10px; display: none; border: 1px solid #333; }
+    </style>
+</head>
+<body>
+
+<div class="box">
+    <h2 style="text-align:center; color:#00e5ff;">Video TTS Offline</h2>
+    
+    <label style="font-size: 14px;">1. Pilih Video:</label><br>
+    <input type="file" id="videoInput" accept="video/*" style="margin-top:5px; font-size:12px;"><br><br>
+
+    <label style="font-size: 14px;">2. Teks Suara:</label>
+    <textarea id="ttsInput" placeholder="Ketik kalimat di sini..."></textarea>
+
+    <button id="startBtn">PROSES SEKARANG</button>
+    
+    <p id="status">Siap digunakan.</p>
+    <video id="outputPreview" controls playsinline></video>
+    <a id="dlLink" style="display:none; text-align:center; color:#00e5ff; margin-top:10px; font-weight:bold; text-decoration:none;">KLIK UNTUK DOWNLOAD</a>
+</div>
+
+<canvas id="c" style="display:none;"></canvas>
+
+<script>
+    const startBtn = document.getElementById('startBtn');
+    const status = document.getElementById('status');
+    const preview = document.getElementById('outputPreview');
+    const dlLink = document.getElementById('dlLink');
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+
+    startBtn.onclick = async () => {
+        const file = document.getElementById('videoInput').files[0];
+        const text = document.getElementById('ttsInput').value;
+
+        if (!file || !text) return alert("Pilih video dan isi teks!");
+
+        startBtn.disabled = true;
+        status.innerText = "Menyiapkan sistem...";
+
+        // 1. Setup Video Latar Belakang
+        const video = document.createElement('video');
+        video.src = URL.createObjectURL(file);
+        video.muted = true;
+        video.playsInline = true;
+        await video.play();
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        // 2. Setup Recording
+        const stream = canvas.captureStream(25);
+        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
+        const chunks = [];
+
+        recorder.ondataavailable = e => chunks.push(e.data);
+        recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: 'video/mp4' });
+            const url = URL.createObjectURL(blob);
+            preview.src = url;
+            preview.style.display = "block";
+            dlLink.href = url;
+            dlLink.download = "video_tts_berhasil.mp4";
+            dlLink.style.display = "block";
+            status.innerText = "Proses Selesai! Silakan download.";
+            startBtn.disabled = false;
+        };
+
+        // 3. Jalankan TTS Bawaan HP (Offline/No Fetch)
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'id-ID';
+        utterance.rate = 1.0;
+
+        recorder.start();
+        status.innerText = "Sedang merekam video & suara...";
+
+        // Loop Gambar
+        const draw = () => {
+            if (!video.paused && !video.ended) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                requestAnimationFrame(draw);
+            }
+        };
+        draw();
+
+        // Mulai Suara
+        window.speechSynthesis.speak(utterance);
+
+        video.onended = () => {
+            recorder.stop();
+            video.remove();
+        };
+
+        // Safety jika TTS sangat panjang
+        utterance.onend = () => {
+            if (video.ended) {
+                recorder.stop();
+            }
+        };
+    };
+</script>
+
+</body>
+</html>
