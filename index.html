@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Video TTS Editor Indonesia</title>
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #eef2f3; display: flex; justify-content: center; padding: 20px; }
+        .container { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 600px; }
+        h2 { color: #333; text-align: center; }
+        .section { margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
+        label { display: block; font-weight: bold; margin-bottom: 8px; color: #555; }
+        textarea { width: 100%; height: 80px; padding: 10px; border: 1px solid #ccc; border-radius: 8px; resize: none; box-sizing: border-box; }
+        input[type="file"] { margin-bottom: 10px; }
+        button { width: 100%; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; transition: 0.3s; margin-top: 10px; }
+        .btn-process { background: #6200ea; color: white; }
+        .btn-process:disabled { background: #ccc; cursor: not-allowed; }
+        #status { text-align: center; margin-top: 15px; color: #666; font-style: italic; }
+        video { width: 100%; border-radius: 10px; margin-top: 15px; display: none; background: #000; }
+        #downloadArea { display: none; text-align: center; margin-top: 20px; }
+        .download-link { color: #00c853; font-weight: bold; text-decoration: none; border: 2px solid #00c853; padding: 10px; border-radius: 8px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Video Voiceover TTS</h2>
+
+    <div class="section">
+        <label>1. Pilih Video (Maks 60 Detik):</label>
+        <input type="file" id="videoInput" accept="video/*">
+        <p id="infoVideo" style="font-size: 12px; color: red;"></p>
+    </div>
+
+    <div class="section">
+        <label>2. Ketik Teks Suara (Bahasa Indonesia):</label>
+        <textarea id="ttsInput" placeholder="Contoh: Halo semuanya, selamat datang di video ini..."></textarea>
+    </div>
+
+    <button id="processBtn" class="btn-process">Mulai Proses (Hapus Suara & Isi TTS)</button>
+    
+    <div id="status">Siap digunakan.</div>
+
+    <div id="downloadArea">
+        <p>Proses Selesai!</p>
+        <video id="outputVideo" controls></video><br><br>
+        <a id="downloadLink" class="download-link">Klik Disini untuk Download Video</a>
+    </div>
+</div>
+
+<script>
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const ffmpeg = createFFmpeg({ log: true });
+
+    const videoInput = document.getElementById('videoInput');
+    const ttsInput = document.getElementById('ttsInput');
+    const processBtn = document.getElementById('processBtn');
+    const status = document.getElementById('status');
+    const downloadArea = document.getElementById('downloadArea');
+    const outputVideo = document.getElementById('outputVideo');
+    const downloadLink = document.getElementById('downloadLink');
+
+    // Validasi durasi video
+    videoInput.addEventListener('change', function() {
+        const file = this.files[0];
+        const vid = document.createElement('video');
+        vid.preload = 'metadata';
+        vid.onloadedmetadata = function() {
+            window.URL.revokeObjectURL(vid.src);
+            if (vid.duration > 61) {
+                document.getElementById('infoVideo').innerText = "Video terlalu panjang! Maksimal 60 detik.";
+                processBtn.disabled = true;
+            } else {
+                document.getElementById('infoVideo').innerText = "";
+                processBtn.disabled = false;
+            }
+        }
+        vid.src = URL.createObjectURL(file);
+    });
+
+    async function processVideo() {
+        const videoFile = videoInput.files[0];
+        const text = ttsInput.value;
+
+        if (!videoFile || !text) {
+            alert("Harap pilih video dan masukkan teks!");
+            return;
+        }
+
+        status.innerText = "Memuat FFmpeg... (Mungkin butuh waktu)";
+        processBtn.disabled = true;
+
+        if (!ffmpeg.isLoaded()) {
+            await ffmpeg.load();
+        }
+
+        status.innerText = "Menyiapkan Suara TTS...";
+        
+        // Mengambil suara dari Google TTS
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=id&client=tw-ob`;
+        const ttsData = await fetch(ttsUrl).then(res => res.blob());
+
+        // Masukkan file ke memori FFmpeg virtual
+        status.innerText = "Memproses Video... Mohon tunggu.";
+        ffmpeg.FS('writeFile', 'input_video.mp4', await fetchFile(videoFile));
+        ffmpeg.FS('writeFile', 'input_audio.mp3', await fetchFile(ttsData));
+
+        // Command FFmpeg: 
+        // -an: hapus audio asli video
+        // -i input_audio.mp3: masukkan audio baru
+        // -shortest: pastikan audio berhenti jika video habis
+        await ffmpeg.run(
+            '-i', 'input_video.mp4', 
+            '-i', 'input_audio.mp3', 
+            '-map', '0:v',           // Ambil video dari input 0
+            '-map', '1:a',           // Ambil audio dari input 1
+            '-c:v', 'copy',          // Copy video tanpa re-encode (biar cepat)
+            '-c:a', 'aac',           // Encode audio ke AAC
+            '-shortest', 
+            'output.mp4'
+        );
+
+        // Ambil hasil
+        const data = ffmpeg.FS('readFile', 'output.mp4');
+        const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+
+        // Tampilkan hasil
+        status.innerText = "Berhasil!";
+        downloadArea.style.display = "block";
+        outputVideo.src = url;
+        outputVideo.style.display = "block";
+        downloadLink.href = url;
+        downloadLink.download = "video-tts-final.mp4";
+        processBtn.disabled = false;
+    }
+
+    processBtn.addEventListener('click', processVideo);
+</script>
+
+</body>
+</html>
