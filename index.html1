@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video TTS Editor Pro - Satu Klik</title>
+    
+    <!-- Library untuk mengaktifkan fitur keamanan di GitHub Pages -->
+    <script src="https://cdn.jsdelivr.net/gh/gzuidhof/coi-serviceworker@latest/coi-serviceworker.min.js"></script>
+    
+    <!-- Library FFmpeg.wasm -->
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; padding: 20px; }
+        .container { background: #1e293b; padding: 25px; border-radius: 16px; width: 100%; max-width: 500px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); border: 1px solid #334155; }
+        h2 { text-align: center; color: #38bdf8; margin-top: 0; }
+        .input-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; font-size: 14px; color: #94a3b8; }
+        textarea { width: 100%; height: 100px; background: #0f172a; color: white; border: 1px solid #334155; border-radius: 8px; padding: 12px; box-sizing: border-box; resize: none; }
+        input[type="file"] { width: 100%; padding: 10px; background: #334155; border-radius: 8px; font-size: 12px; }
+        
+        .status-box { background: #334155; padding: 12px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #38bdf8; }
+        #statusText { font-size: 13px; margin: 0; }
+        .progress-bar { height: 6px; background: #0f172a; border-radius: 10px; margin-top: 10px; overflow: hidden; }
+        #progressFill { width: 0%; height: 100%; background: #38bdf8; transition: width 0.3s; }
+        
+        button { width: 100%; padding: 14px; background: #0284c7; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 16px; }
+        button:hover { background: #0369a1; }
+        button:disabled { background: #475569; cursor: not-allowed; }
+        
+        video { width: 100%; margin-top: 20px; border-radius: 12px; display: none; border: 2px solid #334155; }
+        .download-btn { display: none; margin-top: 15px; text-align: center; padding: 12px; background: #22c55e; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; }
+        .download-btn:hover { background: #16a34a; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Video + TTS Indo</h2>
+    
+    <div class="input-group">
+        <label>1. Masukkan Video (Maks 60 Detik)</label>
+        <input type="file" id="videoInput" accept="video/*">
+    </div>
+
+    <div class="input-group">
+        <label>2. Ketik Teks Suara (Indonesian)</label>
+        <textarea id="ttsInput" placeholder="Contoh: Selamat datang di video saya yang sudah diisi suara otomatis..."></textarea>
+    </div>
+
+    <div class="status-box">
+        <p id="statusText">Status: Siap.</p>
+        <div class="progress-bar"><div id="progressFill"></div></div>
+    </div>
+
+    <button id="processBtn">PROSES VIDEO SEKARANG</button>
+
+    <video id="outputVideo" controls></video>
+    <a id="downloadBtn" class="download-btn">DOWNLOAD HASIL VIDEO (.MP4)</a>
+</div>
+
+<script>
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    // Inisialisasi FFmpeg dengan konfigurasi yang lebih stabil
+    const ffmpeg = createFFmpeg({ 
+        log: true,
+        corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+    });
+
+    const processBtn = document.getElementById('processBtn');
+    const statusText = document.getElementById('statusText');
+    const progressFill = document.getElementById('progressFill');
+    const outputVideo = document.getElementById('outputVideo');
+    const downloadBtn = document.getElementById('downloadBtn');
+
+    async function process() {
+        const videoFile = document.getElementById('videoInput').files[0];
+        const text = document.getElementById('ttsInput').value;
+
+        if (!videoFile || !text) {
+            alert("Pilih file video dan isi teks terlebih dahulu!");
+            return;
+        }
+
+        try {
+            processBtn.disabled = true;
+            statusText.innerText = "Mengaktifkan Engine (Mungkin 10-20 detik)...";
+
+            // Load FFmpeg jika belum
+            if (!ffmpeg.isLoaded()) {
+                await ffmpeg.load();
+            }
+
+            // Tracking progress
+            ffmpeg.setProgress(({ ratio }) => {
+                const pct = Math.round(ratio * 100);
+                progressFill.style.width = pct + "%";
+                statusText.innerText = `Memproses: ${pct}%`;
+            });
+
+            // 1. Ambil Suara TTS dari Google (Bahasa Indonesia)
+            statusText.innerText = "Menghasilkan suara TTS...";
+            const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=id&client=tw-ob`;
+            const ttsResponse = await fetch(ttsUrl);
+            const ttsBlob = await ttsResponse.blob();
+
+            // 2. Simpan file ke sistem memori FFmpeg
+            statusText.innerText = "Menyiapkan file...";
+            ffmpeg.FS('writeFile', 'input_vid.mp4', await fetchFile(videoFile));
+            ffmpeg.FS('writeFile', 'input_audio.mp3', await fetchFile(ttsBlob));
+
+            // 3. Eksekusi FFmpeg
+            // -c:v copy agar video tidak di-encode ulang (Sangat cepat)
+            // -map 0:v amil video dari file 1
+            // -map 1:a ambil audio dari file 2
+            statusText.innerText = "Menggabungkan (Mute suara asli & isi TTS)...";
+            await ffmpeg.run(
+                '-i', 'input_vid.mp4',
+                '-i', 'input_audio.mp3',
+                '-map', '0:v:0',
+                '-map', '1:a:0',
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-shortest',
+                'hasil_final.mp4'
+            );
+
+            // 4. Baca hasil akhir
+            const data = ffmpeg.FS('readFile', 'hasil_final.mp4');
+            const resultUrl = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+
+            // Tampilkan hasil
+            outputVideo.src = resultUrl;
+            outputVideo.style.display = "block";
+            downloadBtn.href = resultUrl;
+            downloadBtn.download = "video_tts_indonesia.mp4";
+            downloadBtn.style.display = "block";
+            
+            statusText.innerText = "Selesai! Silakan cek video di bawah.";
+            progressFill.style.width = "100%";
+
+        } catch (error) {
+            console.error(error);
+            statusText.innerText = "Error: Browser memblokir fitur. Coba refresh atau gunakan Chrome terbaru.";
+            alert("Terjadi kesalahan teknis. Pastikan Anda membuka via link https (GitHub Pages) dan bukan file lokal.");
+        } finally {
+            processBtn.disabled = false;
+        }
+    }
+
+    processBtn.addEventListener('click', process);
+</script>
+
+</body>
+</html>
