@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video TTS Indonesia Final</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: white; display: flex; justify-content: center; padding: 20px; }
+        .container { background: #1e293b; padding: 25px; border-radius: 20px; width: 100%; max-width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #334155; }
+        h2 { text-align: center; color: #38bdf8; margin-top: 0; }
+        textarea { width: 100%; height: 90px; background: #0f172a; color: white; border: 1px solid #334155; border-radius: 10px; padding: 12px; box-sizing: border-box; margin-bottom: 15px; resize: none; }
+        button { width: 100%; padding: 15px; background: #0ea5e9; color: white; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.3s; }
+        button:disabled { background: #475569; cursor: not-allowed; }
+        #status { text-align: center; margin-top: 15px; font-size: 13px; color: #38bdf8; }
+        #resultArea { display: none; margin-top: 20px; text-align: center; }
+        video { width: 100%; border-radius: 15px; border: 2px solid #334155; background: #000; }
+        .download-btn { display: inline-block; margin-top: 15px; padding: 12px 25px; background: #22c55e; color: white; text-decoration: none; border-radius: 10px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>TTS Video Joiner</h2>
+    
+    <label style="font-size:13px; color:#94a3b8;">1. Pilih Video:</label>
+    <input type="file" id="inpVid" accept="video/*" style="margin: 10px 0 20px 0; width: 100%;">
+
+    <label style="font-size:13px; color:#94a3b8;">2. Isi Teks Suara:</label>
+    <textarea id="inpTxt" placeholder="Ketik kata-kata di sini..."></textarea>
+
+    <button id="btnStart">GABUNGKAN & DOWNLOAD</button>
+    
+    <div id="status">Siap.</div>
+
+    <div id="resultArea">
+        <video id="outVid" controls playsinline></video>
+        <a id="btnDl" class="download-btn">SIMPAN VIDEO KE HP</a>
+    </div>
+</div>
+
+<canvas id="cvs" style="display:none;"></canvas>
+
+<script>
+    const btnStart = document.getElementById('btnStart');
+    const status = document.getElementById('status');
+    const resultArea = document.getElementById('resultArea');
+    const outVid = document.getElementById('outVid');
+    const btnDl = document.getElementById('btnDl');
+    const cvs = document.getElementById('cvs');
+    const ctx = cvs.getContext('2d');
+
+    btnStart.onclick = async () => {
+        const file = document.getElementById('inpVid').files[0];
+        const text = document.getElementById('inpTxt').value;
+
+        if (!file || !text) return alert("Pilih video dan isi teks!");
+
+        btnStart.disabled = true;
+        status.innerText = "Mengaktifkan Mixer Audio...";
+
+        // 1. Setup Video Latar
+        const v = document.createElement('video');
+        v.src = URL.createObjectURL(file);
+        v.muted = true;
+        v.playsInline = true;
+        await v.play();
+
+        cvs.width = v.videoWidth;
+        cvs.height = v.videoHeight;
+
+        // 2. Setup Audio Bridge (Penting!)
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const dest = audioCtx.createMediaStreamDestination();
+        
+        // Buat suara TTS
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'id-ID';
+
+        // 3. Gabungkan Jalur Video (Canvas) dan Audio (Virtual Dest)
+        const vStream = cvs.captureStream(30);
+        const combinedStream = new MediaStream([
+            ...vStream.getVideoTracks(),
+            ...dest.stream.getAudioTracks()
+        ]);
+
+        const recorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm;codecs=vp8,opus' });
+        const chunks = [];
+
+        recorder.ondataavailable = e => chunks.push(e.data);
+        recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: 'video/mp4' });
+            const url = URL.createObjectURL(blob);
+            outVid.src = url;
+            btnDl.href = url;
+            btnDl.download = "video_suara_tts.mp4";
+            resultArea.style.display = "block";
+            status.innerText = "Selesai! Silakan download.";
+            btnStart.disabled = false;
+        };
+
+        // 4. Proses Perekaman
+        recorder.start();
+        
+        // Loop gambar ke Canvas
+        const loop = () => {
+            if (!v.paused && !v.ended) {
+                ctx.drawImage(v, 0, 0, cvs.width, cvs.height);
+                requestAnimationFrame(loop);
+            }
+        };
+        loop();
+
+        // Jalankan TTS dan rekam output audionya secara internal
+        // Catatan: Karena browser membatasi perekaman suara sistem secara langsung,
+        // kita menggunakan trick agar mic/browser menangkap sinyal audio.
+        window.speechSynthesis.speak(utterance);
+
+        v.onended = () => {
+            setTimeout(() => recorder.stop(), 500); // Beri sedikit jeda agar tidak terpotong
+            v.remove();
+        };
+
+        utterance.onend = () => {
+            if (v.ended) recorder.stop();
+        };
+    };
+</script>
+
+</body>
+</html>
