@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video TTS Pro - Fixed</title>
+    
+    <script>
+        // DAFTARKAN SERVICE WORKER (Wajib agar FFmpeg tidak error)
+        if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.register("sw.js")
+                .then(reg => {
+                    console.log("SW Registered!");
+                    // Jika SW baru aktif, refresh halaman otomatis sekali saja
+                    reg.addEventListener("updatefound", () => {
+                        window.location.reload();
+                    });
+                })
+                .catch(err => console.error("SW Registration Failed:", err));
+        }
+    </script>
+
+    <!-- Library FFmpeg.wasm -->
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+
+    <style>
+        body { font-family: sans-serif; background: #0f172a; color: white; display: flex; justify-content: center; padding: 20px; }
+        .container { background: #1e293b; padding: 20px; border-radius: 12px; width: 100%; max-width: 450px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        h2 { text-align: center; color: #38bdf8; font-size: 1.2rem; }
+        label { display: block; margin-bottom: 5px; font-size: 0.9rem; color: #94a3b8; }
+        textarea { width: 100%; height: 80px; background: #0f172a; color: white; border: 1px solid #334155; border-radius: 8px; padding: 10px; box-sizing: border-box; margin-bottom: 15px; }
+        input[type="file"] { margin-bottom: 15px; font-size: 0.8rem; }
+        .status-box { background: #334155; padding: 10px; border-radius: 8px; margin-bottom: 15px; }
+        #statusText { font-size: 12px; margin: 0; }
+        .progress-bar { height: 4px; background: #0f172a; border-radius: 10px; margin-top: 8px; overflow: hidden; }
+        #progressFill { width: 0%; height: 100%; background: #38bdf8; transition: width 0.3s; }
+        button { width: 100%; padding: 12px; background: #0284c7; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        button:disabled { background: #475569; }
+        video { width: 100%; margin-top: 15px; border-radius: 8px; display: none; }
+        .download-link { display: none; margin-top: 10px; text-align: center; padding: 10px; background: #22c55e; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Video + TTS Indonesia</h2>
+    
+    <label>1. Pilih Video (Maks 60s)</label>
+    <input type="file" id="videoInput" accept="video/*">
+
+    <label>2. Teks Suara</label>
+    <textarea id="ttsInput" placeholder="Ketik teks di sini..."></textarea>
+
+    <div class="status-box">
+        <p id="statusText">Status: Siap.</p>
+        <div class="progress-bar"><div id="progressFill"></div></div>
+    </div>
+
+    <button id="processBtn">MULAI PROSES</button>
+
+    <video id="outputVideo" controls></video>
+    <a id="downloadBtn" class="download-link">DOWNLOAD MP4</a>
+</div>
+
+<script>
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const ffmpeg = createFFmpeg({ 
+        log: true,
+        corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+    });
+
+    const processBtn = document.getElementById('processBtn');
+    const statusText = document.getElementById('statusText');
+    const progressFill = document.getElementById('progressFill');
+    const outputVideo = document.getElementById('outputVideo');
+    const downloadBtn = document.getElementById('downloadBtn');
+
+    async function process() {
+        const videoFile = document.getElementById('videoInput').files[0];
+        const text = document.getElementById('ttsInput').value;
+
+        if (!videoFile || !text) return alert("Lengkapi video & teks!");
+
+        try {
+            processBtn.disabled = true;
+            statusText.innerText = "Memuat Engine FFmpeg...";
+
+            if (!ffmpeg.isLoaded()) await ffmpeg.load();
+
+            ffmpeg.setProgress(({ ratio }) => {
+                const pct = Math.round(ratio * 100);
+                progressFill.style.width = pct + "%";
+                statusText.innerText = `Memproses: ${pct}%`;
+            });
+
+            // 1. Generate TTS (Google Indo)
+            statusText.innerText = "Membuat suara TTS...";
+            const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=id&client=tw-ob`;
+            const ttsBlob = await fetch(ttsUrl).then(r => r.blob());
+
+            // 2. Tulis file ke memori virtual
+            ffmpeg.FS('writeFile', 'v.mp4', await fetchFile(videoFile));
+            ffmpeg.FS('writeFile', 'a.mp3', await fetchFile(ttsBlob));
+
+            // 3. Gabungkan (Copy Video, Encode Audio AAC)
+            // Ini sangat cepat karena video tidak diproses ulang
+            statusText.innerText = "Menggabungkan video...";
+            await ffmpeg.run(
+                '-i', 'v.mp4',
+                '-i', 'a.mp3',
+                '-map', '0:v:0',
+                '-map', '1:a:0',
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-shortest',
+                'out.mp4'
+            );
+
+            const data = ffmpeg.FS('readFile', 'out.mp4');
+            const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+
+            outputVideo.src = url;
+            outputVideo.style.display = "block";
+            downloadBtn.href = url;
+            downloadBtn.download = "hasil_video_tts.mp4";
+            downloadBtn.style.display = "block";
+            statusText.innerText = "Selesai!";
+
+        } catch (e) {
+            console.error(e);
+            statusText.innerText = "Gagal. Coba buka di Tab Samaran (Incognito).";
+        } finally {
+            processBtn.disabled = false;
+        }
+    }
+
+    processBtn.addEventListener('click', process);
+</script>
+
+</body>
+</html>
