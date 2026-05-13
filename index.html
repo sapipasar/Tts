@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTS Indonesia - Downloadable</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; padding: 50px; background: #f4f4f9; }
+        .container { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 500px; }
+        textarea { width: 100%; height: 150px; padding: 10px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; resize: none; }
+        .controls { margin-top: 1rem; display: flex; gap: 10px; flex-direction: column; }
+        button { padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        .btn-play { background: #007bff; color: white; }
+        .btn-download { background: #28a745; color: white; display: none; }
+        button:hover { opacity: 0.8; }
+        .info { font-size: 0.8rem; color: #666; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>TTS Indonesia (Max 60 Detik)</h2>
+    <textarea id="textInput" placeholder="Masukkan teks bahasa Indonesia di sini..."></textarea>
+    <p class="info" id="charCount">Karakter: 0 / 500 (Estimasi 60 detik)</p>
+    
+    <div class="controls">
+        <button class="btn-play" onclick="generateAudio()">Generate & Putar Audio</button>
+        <audio id="audioPlayer" controls style="width: 100%; margin-top: 10px; display: none;"></audio>
+        <a id="downloadLink" style="text-decoration: none;">
+            <button class="btn-download" id="downloadBtn">Download MP3</button>
+        </a>
+    </div>
+</div>
+
+<script>
+    const textInput = document.getElementById('textInput');
+    const charCount = document.getElementById('charCount');
+    const audioPlayer = document.getElementById('audioPlayer');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const downloadLink = document.getElementById('downloadLink');
+
+    // Limitasi teks agar tidak lewat dari ~60 detik (rata-rata 150 kata)
+    textInput.addEventListener('input', () => {
+        const length = textInput.value.length;
+        charCount.innerText = `Karakter: ${length} / 500 (Estimasi 60 detik)`;
+        if (length > 500) {
+            textInput.value = textInput.value.substring(0, 500);
+        }
+    });
+
+    function generateAudio() {
+        const text = textInput.value;
+        if (!text) return alert("Isi teks dulu, ya!");
+
+        // Menggunakan API TTS eksternal yang mendukung encoding MP3
+        // Google Translate TTS Proxy
+        const lang = 'id';
+        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${lang}&client=tw-ob`;
+
+        // Update Player
+        audioPlayer.src = ttsUrl;
+        audioPlayer.style.display = "block";
+        audioPlayer.play();
+
+        // Setup Download
+        // Karena batasan CORS pada beberapa browser, kita gunakan fetch untuk blob
+        fetch(ttsUrl)
+            .then(response => response.blob())
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                downloadLink.href = url;
+                downloadLink.download = "tts-indonesia.mp3";
+                downloadBtn.style.display = "block";
+            })
+            .catch(err => {
+                console.error("Gagal menyiapkan download:", err);
+                // Fallback: buka di tab baru jika fetch gagal
+                downloadLink.href = ttsUrl;
+                downloadLink.target = "_blank";
+                downloadBtn.style.display = "block";
+            });
+    }
+</script>
+
+</body>
+</html>
