@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTS Indo Pro - Rekam & Download</title>
+    <style>
+        body { font-family: sans-serif; background: #0f172a; color: white; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; margin: 0; }
+        .card { background: #1e293b; padding: 25px; border-radius: 20px; width: 100%; max-width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #334155; text-align: center; }
+        textarea { width: 100%; height: 100px; background: #0f172a; color: white; border: 1px solid #334155; border-radius: 10px; padding: 12px; box-sizing: border-box; margin-bottom: 15px; resize: none; font-family: inherit; }
+        select { width: 100%; padding: 12px; background: #334155; color: white; border: none; border-radius: 8px; margin-bottom: 15px; cursor: pointer; }
+        button { width: 100%; padding: 16px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; background: #0ea5e9; color: white; font-size: 16px; transition: 0.3s; }
+        button:disabled { background: #475569; cursor: not-allowed; }
+        #status { margin-top: 15px; font-size: 13px; color: #38bdf8; word-break: break-word; }
+        #downloadArea { display: none; margin-top: 20px; padding: 15px; background: #064e3b; border-radius: 12px; border: 1px solid #22c55e; }
+        .dl-btn { display: inline-block; margin-top: 10px; padding: 12px 24px; background: #22c55e; color: white; text-decoration: none; border-radius: 10px; font-weight: bold; transition: 0.2s; }
+        .dl-btn:hover { background: #16a34a; }
+        audio { width: 100%; margin-top: 10px; border-radius: 8px; }
+        small { display: block; margin-top: 12px; color: #94a3b8; font-size: 11px; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>TTS Indonesia Pro</h2>
+    <textarea id="txt" placeholder="Ketik teks di sini... Contoh: Halo, apa kabar? Selamat belajar Text to Speech!"></textarea>
+    
+    <select id="voiceSelect">
+        <option value="wanita">👩 Suara Wanita (Natural)</option>
+        <option value="pria">👨 Suara Pria (Natural)</option>
+        <option value="jawa">🌾 Logat Jawa (Medok)</option>
+    </select>
+
+    <button id="recordBtn" disabled>MULAI REKAM & SIMPAN MP3</button>
+    <div id="status">⏳ Memuat suara... Tunggu sebentar.</div>
+
+    <div id="downloadArea">
+        <p style="margin:0 0 8px 0; font-size: 14px;">✅ Rekaman Selesai!</p>
+        <audio id="audioPlayback" controls></audio>
+        <br>
+        <a id="dlLink" class="dl-btn" download="tts_indo.mp3">⬇️ DOWNLOAD MP3</a>
+    </div>
+    <small>Pastikan volume perangkat tidak senyap. Rekam suara internal browser (TTS) langsung.</small>
+</div>
+
+<script>
+    (function() {
+        // ======================== ELEMEN ========================
+        const recordBtn = document.getElementById('recordBtn');
+        const txt = document.getElementById('txt');
+        const voiceSelect = document.getElementById('voiceSelect');
+        const statusDiv = document.getElementById('status');
+        const downloadArea = document.getElementById('downloadArea');
+        const dlLink = document.getElementById('dlLink');
+        const audioPlayback = document.getElementById('audioPlayback');
+
+        let availableVoices = [];
+        let selectedVoiceObj = null;
+        let voicesLoaded = false;
+
+        // ======================== FUNGSI GET VOICE BAHASA INDONESIA ========================
+        function loadVoices() {
+            return new Promise((resolve) => {
+                let voices = window.speechSynthesis.getVoices();
+                if (voices.length > 0) {
+                    resolve(voices);
+                } else {
+                    window.speechSynthesis.onvoiceschanged = () => {
+                        resolve(window.speechSynthesis.getVoices());
+                    };
+                }
+            });
+        }
+
+        // Cari suara Indonesia terbaik berdasarkan gender
+        function findIndonesianVoice(voices, gender = "female") {
+            // Prioritas: Google Indonesia, Microsoft, dsb.
+            let filtered = voices.filter(voice => voice.lang.includes('id') || voice.lang.includes('ID'));
+            
+            // Kalau tidak ada yang id-ID, cari yang mendekati (ms-MY, dll) tapi tetap bahasa Melayu/Indo
+            if (filtered.length === 0) {
+                filtered = voices.filter(voice => voice.lang.startsWith('id') || voice.lang === 'id-ID');
+            }
+            // Fallback: cari suara dengan 'Indonesian' di name
+            if (filtered.length === 0) {
+                filtered = voices.filter(voice => voice.name.toLowerCase().includes('indonesia') || voice.name.toLowerCase().includes('bahasa'));
+            }
+
+            // Gender mapping (browser biasanya tidak eksplisit, tapi kita bisa prioritaskan berdasarkan nama)
+            if (gender === "female") {
+                const femalePreferred = filtered.find(v => 
+                    v.name.toLowerCase().includes('google') || 
+                    v.name.toLowerCase().includes('female') || 
+                    v.name.toLowerCase().includes('perempuan') ||
+                    v.name.toLowerCase().includes('sari')
+                );
+                if (femalePreferred) return femalePreferred;
+                if (filtered[0]) return filtered[0];
+            } else { // male
+                const malePreferred = filtered.find(v => 
+                    v.name.toLowerCase().includes('male') || 
+                    v.name.toLowerCase().includes('pria') ||
+                    v.name.toLowerCase().includes('jantan')
+                );
+                if (malePreferred) return malePreferred;
+                if (filtered[0]) return filtered[0];
+            }
+            
+            // Fallback ke suara Indonesia pertama
+            if (filtered.length) return filtered[0];
+            
+            // Ultimate fallback: suara apa pun dengan lang id-ID atau English
+            const anyId = voices.find(v => v.lang.includes('id'));
+            if (anyId) return anyId;
+            
+            return null;
+        }
+
+        // Update selected voice berdasarkan pilihan user
+        function updateVoiceSelection() {
+            if (!availableVoices.length) return;
+            const mode = voiceSelect.value;
+            if (mode === "wanita") {
+                selectedVoiceObj = findIndonesianVoice(availableVoices, "female");
+            } else if (mode === "pria") {
+                selectedVoiceObj = findIndonesianVoice(availableVoices, "male");
+            } else if (mode === "jawa") {
+                // Untuk logat Jawa: tetap pakai suara Indonesia tapi kita modulasi pitch/rate nanti
+                selectedVoiceObj = findIndonesianVoice(availableVoices, "female");
+                if (!selectedVoiceObj) selectedVoiceObj = availableVoices.find(v => v.lang.includes('id'));
+            }
+            
+            if (selectedVoiceObj) {
+                statusDiv.innerText = `✅ Siap pakai: ${selectedVoiceObj.name} (${selectedVoiceObj.lang})`;
+                recordBtn.disabled = false;
+            } else {
+                statusDiv.innerText = `⚠️ Suara Indonesia tidak ditemukan, pakai default. Coba browser lain (Chrome/Edge).`;
+                selectedVoiceObj = null;
+                recordBtn.disabled = false; // tetap aktif meskipun pakai default
+            }
+        }
+
+        // ======================== INISIALISASI VOICE ========================
+        async function initVoices() {
+            statusDiv.innerText = "🔄 Memuat daftar suara...";
+            availableVoices = await loadVoices();
+            voicesLoaded = true;
+            updateVoiceSelection();
+        }
+
+        // Event ketika ganti pilihan suara di dropdown
+        voiceSelect.addEventListener('change', () => {
+            if (voicesLoaded) updateVoiceSelection();
+        });
+
+        // Memulai inisialisasi
+        initVoices();
+
+        // ======================== PROSES REKAM & TTS ========================
+        recordBtn.onclick = async () => {
+            const textToSpeak = txt.value.trim();
+            if (!textToSpeak) {
+                alert("Teks masih kosong! Silakan tulis kalimat terlebih dahulu.");
+                return;
+            }
+
+            try {
+                recordBtn.disabled = true;
+                statusDiv.innerText = "🎤 Meminta akses mikrofon (untuk merekam suara internal)...";
+                
+                // Minta akses microphone agar bisa merekam suara yang keluar dari speaker (loopback)
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' }); // WebM lebih stabil, nanti kita export sebagai MP3 via blob? Tapi download tetap file .webm / .mp3? Biar user friendly kita kasih .mp3 walaupun container webm tetap oke.
+                let chunks = [];
+
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) chunks.push(e.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'audio/mp3' }); // Bisa juga 'audio/webm' tapi ekstensi mp3 tetap works untuk play
+                    const url = URL.createObjectURL(blob);
+                    audioPlayback.src = url;
+                    dlLink.href = url;
+                    dlLink.download = `tts_indo_${Date.now()}.mp3`;
+                    downloadArea.style.display = "block";
+                    statusDiv.innerText = "✅ Rekaman selesai! Klik DOWNLOAD MP3 untuk menyimpan.";
+                    recordBtn.disabled = false;
+                    
+                    // Matikan track microphone
+                    stream.getTracks().forEach(track => track.stop());
+                };
+
+                // Membuat utterance (TTS)
+                const utterance = new SpeechSynthesisUtterance(textToSpeak);
+                utterance.lang = 'id-ID';
+                utterance.rate = 0.95;
+                utterance.pitch = 1.0;
+                
+                // Menerapkan variasi berdasarkan pilihan suara & logat Jawa
+                if (voiceSelect.value === "pria") {
+                    utterance.pitch = 0.7;
+                    utterance.rate = 0.9;
+                } else if (voiceSelect.value === "jawa") {
+                    utterance.pitch = 0.85;
+                    utterance.rate = 0.75;  // lebih lambat medok
+                } else { // wanita
+                    utterance.pitch = 1.1;
+                    utterance.rate = 0.95;
+                }
+
+                // Set voice object jika ada
+                if (selectedVoiceObj) {
+                    utterance.voice = selectedVoiceObj;
+                }
+
+                // Event: mulai bicara -> rekaman mulai
+                utterance.onstart = () => {
+                    mediaRecorder.start(100); // collect data setiap 100ms
+                    statusDiv.innerText = "🔴 Sedang merekam suara TTS... Jangan matikan volume / mute!";
+                };
+
+                utterance.onend = () => {
+                    // Hentikan rekaman setelah suara selesai + sedikit buffer
+                    setTimeout(() => {
+                        if (mediaRecorder.state === "recording") {
+                            mediaRecorder.stop();
+                        }
+                        statusDiv.innerText = "✅ Rekaman selesai, memproses file...";
+                    }, 300);
+                };
+
+                utterance.onerror = (err) => {
+                    console.error("TTS Error:", err);
+                    statusDiv.innerText = "❌ Gagal memutar suara. Coba teks lain atau refresh halaman.";
+                    recordBtn.disabled = false;
+                    if (mediaRecorder.state === "recording") mediaRecorder.stop();
+                    stream.getTracks().forEach(track => track.stop());
+                };
+
+                // Mulai bicara (TTS)
+                window.speechSynthesis.cancel(); // batalkan antrian suara sebelumnya
+                window.speechSynthesis.speak(utterance);
+                
+            } catch (err) {
+                console.error("Mic Error:", err);
+                alert("Izin Microphone diperlukan untuk merekam suara internal. Berikan izin mikrofon di browser.");
+                statusDiv.innerText = "❌ Izin mikrofon ditolak. Tidak bisa merekam suara.";
+                recordBtn.disabled = false;
+            }
+        };
+    })();
+</script>
+</body>
+</html>
